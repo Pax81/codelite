@@ -6,6 +6,7 @@
 #include "event_notifier.h"
 #include "globals.h"
 #include "imanager.h"
+#include "wxTerminalCtrl/clBuiltinTerminalPane.hpp"
 
 #include <wx/xrc/xmlres.h>
 
@@ -32,6 +33,11 @@ SecondarySideBar::~SecondarySideBar()
     wxArrayString tabs;
     tabs.reserve(m_book->GetPageCount());
     for (size_t i = 0; i < m_book->GetPageCount(); ++i) {
+        if (m_book->GetPage(i) == m_terminal_pane) {
+            // The terminal page is not part of "secondary_side_bar.tabs": it is restored via
+            // "terminal.in_secondary_sidebar"
+            continue;
+        }
         tabs.Add(m_book->GetPageText(i));
     }
 
@@ -57,20 +63,72 @@ void SecondarySideBar::AddPage(wxWindow* win, const wxString& bmpname, const wxS
     }
 }
 
+void SecondarySideBar::ShowTerminalPane(bool takeFocus)
+{
+    if (m_terminal_pane == nullptr) {
+        // A tab dragged into another notebook would lose its event handling here, and the pane must not show the
+        // Terminal tab of the bottom Output View when it gets a new terminal
+        m_terminal_pane = new clBuiltinTerminalPane(this,
+                                                    wxID_ANY,
+                                                    /*allowNotebookDrag=*/false,
+                                                    /*showTerminalTabInOutputPane=*/false);
+        // Not AddPage(): that writes the label into "secondary_side_bar.tabs", which must not contain the terminal
+        m_book->AddPage(m_terminal_pane, kTerminalPageLabel, "console", true);
+        m_book->Realize();
+        m_book->GetSizer()->Layout();
+    }
+
+    int pos = m_book->GetPageIndex(m_terminal_pane);
+    if (pos != wxNOT_FOUND) {
+        m_book->SetSelection(pos);
+    }
+    clGetManager()->ShowPane(VIEW_NAME, true);
+
+    if (takeFocus) {
+        m_terminal_pane->CallAfter(&clBuiltinTerminalPane::SetFocus);
+    }
+}
+
 void SecondarySideBar::OnContextMenu(clContextMenuEvent& event)
 {
     wxMenu menu;
-    menu.Append(XRCID("sidebar-move-to-sidebar"), _("Move to primary sidebar"));
-
     int pos = event.GetSelection();
-    menu.Bind(
-        wxEVT_MENU,
-        [pos, this](wxCommandEvent& e) {
-            wxUnusedVar(e);
-            MoveToPrimarySideBar(pos);
-        },
-        XRCID("sidebar-move-to-sidebar"));
+    if (pos != wxNOT_FOUND && m_book->GetPage(pos) == m_terminal_pane) {
+        // The terminal lives only here: it cannot move to the primary sidebar
+        menu.Append(XRCID("sidebar-remove-terminal"), _("Remove from secondary side bar"));
+        menu.Bind(
+            wxEVT_MENU,
+            [pos, this](wxCommandEvent& e) {
+                wxUnusedVar(e);
+                RemoveTerminalPage(pos);
+            },
+            XRCID("sidebar-remove-terminal"));
+    } else {
+        menu.Append(XRCID("sidebar-move-to-sidebar"), _("Move to primary sidebar"));
+        menu.Bind(
+            wxEVT_MENU,
+            [pos, this](wxCommandEvent& e) {
+                wxUnusedVar(e);
+                MoveToPrimarySideBar(pos);
+            },
+            XRCID("sidebar-move-to-sidebar"));
+    }
     m_book->PopupMenu(&menu);
+}
+
+void SecondarySideBar::RemoveTerminalPage(int pos)
+{
+    // DeletePage() deletes the pane, which terminates its shell processes
+    m_book->DeletePage(pos);
+    m_terminal_pane = nullptr;
+    m_book->GetSizer()->Layout();
+
+    clConfig::Get().Write("terminal.in_secondary_sidebar", false);
+
+    if (m_book->GetPageCount() == 0) {
+        // No more pages -> hide this view
+        clGetManager()->ShowPane(VIEW_NAME, false);
+    }
 }
 
 void SecondarySideBar::MoveToPrimarySideBar(int pos)

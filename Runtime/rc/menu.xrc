@@ -315,6 +315,9 @@
       <object class="wxMenuItem" name="show_terminal_pane">
         <label>Open Terminal...</label>
       </object>
+      <object class="wxMenuItem" name="show_terminal_secondary_sidebar">
+        <label>Terminal (Secondary Side Bar)</label>
+      </object>
       <object class="wxMenuItem" name="wxID_SEPARATOR"/>
       <object class="wxMenuItem" name="output_pane">
         <label>&amp;Output Pane</label>

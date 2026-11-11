@@ -315,6 +315,7 @@ EVT_MENU(XRCID("next_tab"), clMainFrame::OnNextTab)
 EVT_MENU(XRCID("prev_tab"), clMainFrame::OnPrevTab)
 EVT_MENU(XRCID("full_screen"), clMainFrame::OnShowFullScreen)
 EVT_MENU(XRCID("show_terminal_pane"), clMainFrame::OnShowBuiltInTerminal)
+EVT_MENU(XRCID("show_terminal_secondary_sidebar"), clMainFrame::OnShowTerminalSecondarySidebar)
 EVT_MENU(XRCID("show_nav_toolbar"), clMainFrame::OnShowNavBar)
 EVT_MENU(XRCID("toogle_main_toolbars"), clMainFrame::OnToggleMainTBars)
 EVT_MENU(XRCID("toogle_plugin_toolbars"), clMainFrame::OnTogglePluginTBars)
@@ -3508,6 +3509,12 @@ void clMainFrame::CompleteInitialization()
     ManagerST::Get()->GetPerspectiveManager().LoadPerspective(NORMAL_LAYOUT);
     m_initCompleted = true;
 
+    // Restore the terminal page in the secondary side bar if the user had it open. The pane is created before
+    // wxEVT_INIT_DONE is posted, so it loads its themes like the bottom pane
+    if (clConfig::Get().Read("terminal.in_secondary_sidebar", false)) {
+        m_secondary_sidebar->ShowTerminalPane(false);
+    }
+
     if (GetTheApp()->IsStartedInDebuggerMode()) {
         wxCommandEvent quickDebugEvent(wxEVT_MENU, XRCID("quick_debug"));
         quickDebugEvent.SetEventObject(this);
@@ -4620,6 +4627,27 @@ void clMainFrame::OnShowBuiltInTerminal(wxCommandEvent& e)
         if (active_terminal == nullptr) {
             CreateNewTerminal();
         }
+    }
+}
+
+void clMainFrame::OnShowTerminalSecondarySidebar(wxCommandEvent& e)
+{
+    wxUnusedVar(e);
+    if (!m_secondary_sidebar->HasTerminalPane()) {
+        // First use: create the page, show the pane and select the page
+        m_secondary_sidebar->ShowTerminalPane(true);
+        clConfig::Get().Write("terminal.in_secondary_sidebar", true);
+        return;
+    }
+
+    auto& mgr = ManagerST::Get()->GetPerspectiveManager();
+    if (mgr.IsPaneVisible(PANE_RIGHT_SIDEBAR)) {
+        // Hide the pane: the same behaviour as the status-bar toggle (the other pages of the side bar are hidden with
+        // it, the flag stays true)
+        clGetManager()->ShowPane(PANE_RIGHT_SIDEBAR, false);
+    } else {
+        // The page exists but the pane is hidden: show the pane and select the page
+        m_secondary_sidebar->ShowTerminalPane(true);
     }
 }
 

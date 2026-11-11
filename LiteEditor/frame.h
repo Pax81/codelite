@@ -556,6 +556,7 @@ protected:
     void OnNextPrevTab_UI(wxUpdateUIEvent& e);
     void OnShowFullScreen(wxCommandEvent& e);
     void OnShowBuiltInTerminal(wxCommandEvent& e);
+    void OnShowTerminalSecondarySidebar(wxCommandEvent& e);
     void OnFindResourceXXX(wxCommandEvent& e);
     void OnShowActiveProjectSettings(wxCommandEvent& e);
     void OnShowActiveProjectSettingsUI(wxUpdateUIEvent& e);

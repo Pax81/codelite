@@ -79,8 +79,15 @@ public:
      * @brief Create the pane. It has a toolbar and a notebook; every tab of the notebook is a terminal.
      * @param parent The parent window
      * @param id The window ID
+     * @param allowNotebookDrag True to let the user move or split the notebook tabs. Set it to false for panes where a
+     * tab moved into another notebook would lose its event handling (the secondary side bar, for example)
+     * @param showTerminalTabInOutputPane True to show the Terminal tab of the bottom Output View when a terminal is
+     * added or found. Only the bottom pane itself should do that
      */
-    clBuiltinTerminalPane(wxWindow* parent, wxWindowID id = wxID_ANY);
+    clBuiltinTerminalPane(wxWindow* parent,
+                          wxWindowID id = wxID_ANY,
+                          bool allowNotebookDrag = true,
+                          bool showTerminalTabInOutputPane = true);
     ~clBuiltinTerminalPane() override;
 
     /**
@@ -177,6 +184,12 @@ protected:
     void DoOpenLink(const wxString& linkText);
     void OnWorkspaceLoaded(clWorkspaceEvent& event);
     void OnInitDone(wxCommandEvent& e);
+    /// Read the terminal theme files from the disk in a background thread. Loads at most once per pane
+    void LoadThemes();
+    /// The theme was changed by another pane: re-read the shared config and update our tabs
+    void OnExternalThemeChanged(clCommandEvent& event);
+    /// The settings were changed by another pane: re-read the shared config and update our tabs
+    void OnExternalSettingsChanged(clCommandEvent& event);
     void OnPageChanged(wxBookCtrlEvent& event);
     void OnLinkClicked(wxTerminalEvent& event);
     void OnTerminalBell(wxTerminalEvent& event);
@@ -248,5 +261,9 @@ private:
     wxFont m_activeFont;
     TerminalSettings m_terminalSettings;
     std::optional<std::vector<std::pair<int, clKeyboardShortcut>>> m_frameActions{std::nullopt};
+    bool m_showTerminalTabInOutputPane{true};
+    bool m_themesLoaded{false};
+    // True while a theme/settings change from another pane is applied: it must not re-fire the event and loop
+    bool m_applyingExternalChange{false};
 };
 

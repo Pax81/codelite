@@ -45,9 +45,14 @@ wxTerminalViewCtrl* AgentTerminal::GetTerminal() const
 void AgentTerminal::OnTerminalThemeChanged(clCommandEvent& event)
 {
     event.Skip();
-    auto newTheme = clGetManager()->GetTerminalManager()->GetActiveTheme();
+    // The pane that changed the theme sends itself as the event object. Reading the theme from any pane would depend
+    // on the handler order: only the emitter has its new theme set already
+    auto* emitter = dynamic_cast<clBuiltinTerminalPane*>(event.GetEventObject());
+    if (emitter == nullptr) {
+        emitter = clGetManager()->GetTerminalManager();
+    }
     if (GetTerminal())
-        GetTerminal()->SetTheme(newTheme);
+        GetTerminal()->SetTheme(emitter->GetActiveTheme());
 }
 
 void AgentTerminal::OnTerminalSettingsChanged(clCommandEvent& event)

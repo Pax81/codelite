@@ -315,7 +315,9 @@ void SideBar::MoveToSecondarySideBar(int pos)
 void SideBar::MoveToSecondarySideBar()
 {
     auto secondary_tabs = clConfig::Get().Read("secondary_side_bar.tabs", wxArrayString{});
-    if (secondary_tabs.empty()) {
+    if (secondary_tabs.empty() && !clConfig::Get().Read("terminal.in_secondary_sidebar", false)) {
+        // The terminal page is not in "secondary_side_bar.tabs": with the flag set, the side bar must stay visible
+        // even when the list is empty (terminal-only side bar)
         clGetManager()->ShowPane(SECONDARY_VIEW_NAME, false);
         return;
     }

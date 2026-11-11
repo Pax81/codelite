@@ -165,6 +165,13 @@ wxDEFINE_EVENT(wxEVT_BUILTIN_TERMINAL_PROGRAM_STATUS, clCommandEvent);
 wxDEFINE_EVENT(wxEVT_BUILTIN_TERMINAL_THEME_CHANGED, clCommandEvent);
 wxDEFINE_EVENT(wxEVT_BUILTIN_TERMINAL_SETTINGS_CHANGED, clCommandEvent);
 
+namespace
+{
+/// True once wxEVT_INIT_DONE was dispatched. The event is posted once, so a pane created later never sees it and must
+/// load its themes in its constructor instead
+bool s_initDoneSeen = false;
+} // namespace
+
 TerminalHost::TerminalHost(wxWindow* parent)
     : wxPanel(parent, wxID_ANY)
 {
@@ -203,16 +210,19 @@ void TerminalHost::SetCtrl(wxTerminalViewCtrl* ctrl, bool showProgressBar)
     Layout();
 }
 
-clBuiltinTerminalPane::clBuiltinTerminalPane(wxWindow* parent, wxWindowID id)
+clBuiltinTerminalPane::clBuiltinTerminalPane(wxWindow* parent,
+                                             wxWindowID id,
+                                             bool allowNotebookDrag,
+                                             bool showTerminalTabInOutputPane)
     : wxPanel(parent, id)
+    , m_showTerminalTabInOutputPane(showTerminalTabInOutputPane)
 {
     SetSizer(new wxBoxSizer(wxVERTICAL));
-    m_book = new wxAuiNotebook(
-        this,
-        wxID_ANY,
-        wxDefaultPosition,
-        wxDefaultSize,
-        wxAUI_NB_TAB_MOVE | wxAUI_NB_TAB_FIXED_WIDTH | wxAUI_NB_TAB_SPLIT | wxAUI_NB_CLOSE_ON_ALL_TABS);
+    long book_flags = wxAUI_NB_TAB_FIXED_WIDTH | wxAUI_NB_CLOSE_ON_ALL_TABS;
+    if (allowNotebookDrag) {
+        book_flags |= wxAUI_NB_TAB_MOVE | wxAUI_NB_TAB_SPLIT;
+    }
+    m_book = new wxAuiNotebook(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, book_flags);
 
     // Close the hovered tab
     m_book->Bind(wxEVT_AUINOTEBOOK_TAB_MIDDLE_UP, [this](wxAuiNotebookEvent& event) {
@@ -267,6 +277,17 @@ clBuiltinTerminalPane::clBuiltinTerminalPane(wxWindow* parent, wxWindowID id)
     EventNotifier::Get()->Bind(wxEVT_INIT_DONE, &clBuiltinTerminalPane::OnInitDone, this);
     EventNotifier::Get()->Bind(
         wxEVT_KEYBOARD_SHORTCUTS_UPDATED, &clBuiltinTerminalPane::OnKeyboardShortcutsUpdated, this);
+    // Keep the theme and the settings in sync with any other clBuiltinTerminalPane instance
+    EventNotifier::Get()->Bind(
+        wxEVT_BUILTIN_TERMINAL_THEME_CHANGED, &clBuiltinTerminalPane::OnExternalThemeChanged, this);
+    EventNotifier::Get()->Bind(
+        wxEVT_BUILTIN_TERMINAL_SETTINGS_CHANGED, &clBuiltinTerminalPane::OnExternalSettingsChanged, this);
+
+    // The bottom pane exists when wxEVT_INIT_DONE is dispatched and loads its themes there. A pane created later (the
+    // secondary side bar, for example) never receives that event: load the themes now
+    if (s_initDoneSeen) {
+        LoadThemes();
+    }
 
 #ifdef __WXMAC__
     wxTheApp->Bind(wxEVT_MENU, &clBuiltinTerminalPane::OnCopy, this, wxID_COPY);
@@ -284,6 +305,10 @@ clBuiltinTerminalPane::~clBuiltinTerminalPane()
     EventNotifier::Get()->Unbind(wxEVT_CMD_COLOURS_FONTS_UPDATED, &clBuiltinTerminalPane::OnEditorColoursUpdated, this);
     EventNotifier::Get()->Unbind(
         wxEVT_KEYBOARD_SHORTCUTS_UPDATED, &clBuiltinTerminalPane::OnKeyboardShortcutsUpdated, this);
+    EventNotifier::Get()->Unbind(
+        wxEVT_BUILTIN_TERMINAL_THEME_CHANGED, &clBuiltinTerminalPane::OnExternalThemeChanged, this);
+    EventNotifier::Get()->Unbind(
+        wxEVT_BUILTIN_TERMINAL_SETTINGS_CHANGED, &clBuiltinTerminalPane::OnExternalSettingsChanged, this);
 }
 
 void clBuiltinTerminalPane::OnWorkspaceLoaded(clWorkspaceEvent& event) { event.Skip(); }
@@ -550,7 +575,9 @@ TerminalHost* clBuiltinTerminalPane::FindTerminalByTitle(const wxString& tabTitl
             TerminalHost* ctrl = GetPageTerminal(m_book->GetPage(i));
             if (makeVisible) {
                 m_book->SetSelection(i);
-                clGetManager()->ShowOutputPane(TERMINAL_TAB);
+                if (m_showTerminalTabInOutputPane) {
+                    clGetManager()->ShowOutputPane(TERMINAL_TAB);
+                }
             }
             return ctrl;
         }
@@ -595,7 +622,9 @@ TerminalHost* clBuiltinTerminalPane::AddTerminal(const wxString& shellCmd,
         return nullptr;
     }
     m_book->AddPage(host, tabTitle.empty() ? shellCmd : tabTitle, true);
-    clGetManager()->ShowOutputPane(TERMINAL_TAB);
+    if (m_showTerminalTabInOutputPane) {
+        clGetManager()->ShowOutputPane(TERMINAL_TAB);
+    }
     return host;
 }
 
@@ -879,6 +908,16 @@ void clBuiltinTerminalPane::OnCtrlLetter(wxCommandEvent& e)
 void clBuiltinTerminalPane::OnInitDone(wxCommandEvent& e)
 {
     e.Skip();
+    s_initDoneSeen = true;
+    LoadThemes();
+}
+
+void clBuiltinTerminalPane::LoadThemes()
+{
+    if (m_themesLoaded) {
+        return;
+    }
+    m_themesLoaded = true;
 
     // The background thread must not touch wx objects (strings, colours, file names, ...) or any other global wx
     // state while the main thread is initializing: it reads the files using plain C++ types only, and the themes
@@ -1091,8 +1130,11 @@ void clBuiltinTerminalPane::ApplySettings()
     UpdateTabArt();
 
     // Terminals outside of this pane (the agents, for example) update themselves
-    clCommandEvent settingsChangedEvent{wxEVT_BUILTIN_TERMINAL_SETTINGS_CHANGED};
-    EventNotifier::Get()->AddPendingEvent(settingsChangedEvent);
+    if (!m_applyingExternalChange) {
+        clCommandEvent settingsChangedEvent{wxEVT_BUILTIN_TERMINAL_SETTINGS_CHANGED};
+        settingsChangedEvent.SetEventObject(this);
+        EventNotifier::Get()->AddPendingEvent(settingsChangedEvent);
+    }
 }
 
 void clBuiltinTerminalPane::UpdateTabArt() { UpdateTabArt(m_terminalSettings.m_tabOutlineColour); }
@@ -1130,9 +1172,44 @@ void clBuiltinTerminalPane::ApplyThemeChanges()
     }
     UpdateTabArt();
 
-    // Notify others as well.
-    clCommandEvent themeChangedEvent{wxEVT_BUILTIN_TERMINAL_THEME_CHANGED};
-    EventNotifier::Get()->AddPendingEvent(themeChangedEvent);
+    // Notify others as well. The emitting pane is the event object: with two panes, the handler order on the sink is
+    // unspecified, so consumers must read the new theme from the emitter (or from the config)
+    if (!m_applyingExternalChange) {
+        clCommandEvent themeChangedEvent{wxEVT_BUILTIN_TERMINAL_THEME_CHANGED};
+        themeChangedEvent.SetEventObject(this);
+        EventNotifier::Get()->AddPendingEvent(themeChangedEvent);
+    }
+}
+
+void clBuiltinTerminalPane::OnExternalThemeChanged(clCommandEvent& event)
+{
+    event.Skip();
+    if (m_applyingExternalChange || m_themes.empty()) {
+        return;
+    }
+    // Re-read the theme that the emitting pane saved
+    wxString selected_theme = clConfig::Get().Read("terminal/theme", m_themes.begin()->first);
+    if (!m_themes.contains(selected_theme)) {
+        return;
+    }
+    m_applyingExternalChange = true;
+    m_activeTheme = m_themes[selected_theme];
+    m_choice_themes->SetStringSelection(selected_theme);
+    ApplyThemeChanges();
+    m_applyingExternalChange = false;
+}
+
+void clBuiltinTerminalPane::OnExternalSettingsChanged(clCommandEvent& event)
+{
+    event.Skip();
+    if (m_applyingExternalChange) {
+        return;
+    }
+    // Re-read the settings that the emitting pane saved
+    m_applyingExternalChange = true;
+    m_terminalSettings = TerminalSettings::Load();
+    ApplySettings();
+    m_applyingExternalChange = false;
 }
 
 void clBuiltinTerminalPane::UpdateFont()

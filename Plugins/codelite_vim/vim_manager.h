@@ -12,6 +12,7 @@
 
 #include <wx/kbdstate.h>
 #include <wx/stc/stc.h>
+#include <wx/window.h>
 /*Experimental*/
 #include <list>
 
@@ -32,6 +33,7 @@ public:
 protected:
     void OnEditorChanged(wxCommandEvent& event);
     void OnEditorClosing(wxCommandEvent& event);
+    void OnEditorDestroying(wxWindowDestroyEvent& event);
     void OnWorkspaceClosing(clWorkspaceEvent& event);
     void OnAllEditorsClosing(wxCommandEvent& event);
     void OnCharEvt(wxKeyEvent& event);

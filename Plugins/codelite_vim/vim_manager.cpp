@@ -339,7 +339,30 @@ void VimManager::SaveCurrentEditor()
 void VimManager::OnEditorClosing(wxCommandEvent& event)
 {
     event.Skip();
+
+    // The editor is still alive here. It is deleted by the notebook right after this event returns.
+    IEditor* closing = (IEditor*)event.GetClientData();
+    if (closing != m_editor) {
+        // another tab was closed: keep the bindings of the current editor
+        return;
+    }
+
+    DeleteClosedEditorState(); // drop the saved state of the closing editor
     DoCleanup();
+}
+
+void VimManager::OnEditorDestroying(wxWindowDestroyEvent& event)
+{
+    event.Skip();
+
+    if (m_ctrl == nullptr || event.GetWindow() != m_ctrl) {
+        return;
+    }
+
+    // Safety net for the editor windows deleted without wxEVT_EDITOR_CLOSING (for example
+    // clNativeNotebook::DeleteAllPages()). The window is going away, so only drop our pointers here:
+    // calling anything on m_editor or on m_ctrl is not safe at this point.
+    DoCleanup(false);
 }
 
 void VimManager::DoCleanup(bool unbind)
@@ -347,6 +370,7 @@ void VimManager::DoCleanup(bool unbind)
     if (m_ctrl && unbind) {
         m_ctrl->Unbind(wxEVT_CHAR, &VimManager::OnCharEvt, this);
         m_ctrl->Unbind(wxEVT_KEY_DOWN, &VimManager::OnKeyDown, this);
+        m_ctrl->Unbind(wxEVT_DESTROY, &VimManager::OnEditorDestroying, this);
         m_ctrl->SetCaretStyle(m_caretInsertStyle);
     }
 
@@ -377,6 +401,9 @@ void VimManager::DoBindEditor(IEditor* editor)
     m_ctrl = m_editor->GetCtrl();
     m_ctrl->Bind(wxEVT_CHAR, &VimManager::OnCharEvt, this);
     m_ctrl->Bind(wxEVT_KEY_DOWN, &VimManager::OnKeyDown, this);
+    // wxWidgets sends this event once, synchronously, before the window is deleted. It is the only
+    // notification that also covers the pages deleted without a close notification from the book.
+    m_ctrl->Bind(wxEVT_DESTROY, &VimManager::OnEditorDestroying, this);
 
     /*baby-steps*/
     setUpVimBar();
@@ -425,6 +452,8 @@ void VimManager::OnAllEditorsClosing(wxCommandEvent& event)
 
 void VimManager::UpdateOldEditorState()
 {
+    if (!m_editor)
+        return;
 
     wxString fullpath_name = m_editor->GetFileName().GetFullPath();
 

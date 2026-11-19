@@ -18,6 +18,28 @@
 #include <wx/types.h>
 #include <wx/wupdlock.h>
 
+namespace
+{
+/// Marks the time while the notebook removes a page.
+///
+/// wxNotebook fires page-changing/page-changed events while it removes the page and during those events it still
+/// reports that page as the selected one. Publishing it would make the whole application use an editor that is
+/// deleted a moment later, so the events of that moment are dropped (see OnPageChanging() and OnPageChanged()).
+class RemovingPageGuard
+{
+public:
+    explicit RemovingPageGuard(bool& flag)
+        : m_flag(flag)
+    {
+        m_flag = true;
+    }
+    ~RemovingPageGuard() { m_flag = false; }
+
+private:
+    bool& m_flag;
+};
+} // namespace
+
 #ifdef __WXGTK__
 
 //===------------------
@@ -297,6 +319,13 @@ bool clNativeNotebook::GetPageDetails(wxWindow* page, int& curindex, wxString& l
 
 void clNativeNotebook::OnPageChanged(wxBookCtrlEvent& e)
 {
+    if (m_removingPage) {
+        // The book is removing a page and it still reports that page as the selected one. Telling the application
+        // about it would publish an editor that is deleted a moment later. MainBook reports the new selection once
+        // the page is gone (wxEVT_BOOK_PAGE_CLOSED).
+        return;
+    }
+
     wxBookCtrlEvent event(wxEVT_BOOK_PAGE_CHANGED);
     event.SetEventObject(this);
     event.SetSelection(GetSelection());
@@ -307,6 +336,12 @@ void clNativeNotebook::OnPageChanged(wxBookCtrlEvent& e)
 
 void clNativeNotebook::OnPageChanging(wxBookCtrlEvent& e)
 {
+    if (m_removingPage) {
+        // Allow the change, but do not ask the application about a page that is being removed
+        e.Skip();
+        return;
+    }
+
     // wrap this event with our own event
     wxBookCtrlEvent event(wxEVT_BOOK_PAGE_CHANGING);
     event.SetEventObject(this);
@@ -381,6 +416,7 @@ bool clNativeNotebook::RemovePage(size_t page, bool notify)
     m_history->Pop(win);
     bool deletingSelection = (static_cast<int>(page) == GetSelection());
     wxWindow* nextSelection = DoUpdateHistoryPreRemove(win);
+    const RemovingPageGuard guard{m_removingPage};
     wxNotebook::RemovePage(page);
 
     // notify about removal
@@ -422,7 +458,12 @@ bool clNativeNotebook::DeletePage(size_t page, bool notify)
     wxWindow* nextSelection = DoUpdateHistoryPreRemove(win);
 
     m_history->Pop(win);
-    wxNotebook::DeletePage(page);
+    {
+        // wxNotebook fires page-change events for the page it removes, while it still reports it as the selected
+        // one. They are dropped: wxEVT_BOOK_PAGE_CLOSED below reports the new selection.
+        const RemovingPageGuard guard{m_removingPage};
+        wxNotebook::DeletePage(page);
+    }
     m_userData.erase(win);
 
     // notify about removal

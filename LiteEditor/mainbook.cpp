@@ -311,6 +311,10 @@ void MainBook::OnPageClosing(wxBookCtrlEvent& e)
 {
     e.Skip();
     auto win = m_book->GetPage(e.GetSelection());
+    m_closingPage = win;
+    // Safety net: the flag is cleared by OnPageClosed(), but a book may report the closed page later (the AUI book
+    // posts that event). This runs once the book is done with the close, so the flag can never stay set.
+    CallAfter(&MainBook::ClearClosingPage);
     clEditor* editor = clEditorFromPage(win);
     if (editor) {
         if (AskUserToSave(editor)) {
@@ -337,11 +341,18 @@ void MainBook::OnPageClosing(wxBookCtrlEvent& e)
             e.Veto();
         }
     }
+
+    if (!e.IsAllowed()) {
+        m_closingPage = nullptr; // the page stays open, it may be published again
+    }
 }
+
+void MainBook::ClearClosingPage() { m_closingPage = nullptr; }
 
 void MainBook::OnPageClosed(wxBookCtrlEvent& e)
 {
     e.Skip();
+    m_closingPage = nullptr; // the page is gone, publishing a page is correct again
     SelectPage(m_book->GetCurrentPage());
 
     // any editors left open?
@@ -1385,6 +1396,13 @@ long MainBook::GetBookStyle() { return 0; }
 bool MainBook::DoSelectPage(wxWindow* win)
 {
     if (win == nullptr) {
+        return false;
+    }
+
+    if (win == m_closingPage) {
+        // The book is removing this page and it still reports it as the selected one. Publishing it would give
+        // everyone an editor that is deleted a moment later. OnPageClosed() publishes the new selection instead.
+        wxFAIL_MSG("Publishing a page that the book is closing");
         return false;
     }
 

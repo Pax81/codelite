@@ -299,6 +299,9 @@ private:
     void OnThemeChanged(clCommandEvent& e);
     void OnColoursAndFontsChanged(clCommandEvent& e);
     bool DoSelectPage(wxWindow* win);
+    /// Forgets the page that the book is closing (see m_closingPage). Called by OnPageClosed() and by CallAfter()
+    /// from OnPageClosing(), so the flag can never stay set.
+    void ClearClosingPage();
     void DoHandleFrameMenu(clEditor* editor);
     void OnWorkspaceReloadStarted(clWorkspaceEvent& e);
     void OnWorkspaceReloadEnded(clWorkspaceEvent& e);
@@ -480,6 +483,10 @@ private:
     FileHistory m_recentFiles;
     clEditorBar* m_navBar{nullptr};
     MainNotebook* m_book{nullptr};
+    /// The page the book is closing. While the book removes it, the book still reports that page as the selected
+    /// one, and publishing it would make everyone use an editor that is deleted a moment later.
+    /// See OnPageClosing(), OnPageClosed() and DoSelectPage().
+    wxWindow* m_closingPage{nullptr};
     bool m_useBuffereLimit{true};
     bool m_isWorkspaceReloading{false};
     bool m_reloadingDoRaise{true};  // Prevents multiple Raises() during RestoreSession()
@@ -497,4 +504,3 @@ private:
     bool m_showMiniMap{false};
 #endif
 };
-

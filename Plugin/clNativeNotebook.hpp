@@ -26,6 +26,9 @@ protected:
     wxMenu* m_tabContextMenu = nullptr;
     clTabHistory::Ptr_t m_history;
     clBitmapList* m_bitmaps = nullptr;
+    /// The book is removing a page. While it does that, wxNotebook still reports that page as the selected one and
+    /// fires page-changing/page-changed events for it (see OnPageChanging() and OnPageChanged()).
+    bool m_removingPage{false};
 
 protected:
     void DoFinaliseAddPage(wxWindow* page, const wxString& shortlabel, int bmp);
